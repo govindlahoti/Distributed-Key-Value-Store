@@ -5,6 +5,8 @@ import (
 	"net/rpc/jsonrpc"
 	"net/rpc"
 	"fmt"
+	"math/rand"
+	"strconv"
 )
 
 func consistentHash(s string) uint64 {
@@ -34,4 +36,8 @@ func getClient(addr string) (*rpc.Client,error) {
 
 func power2(power int) uint64 {
 	return (uint64(1) << uint(power))
+}
+
+func randomString() string {
+	return strconv.Itoa(rand.Intn(1000000))
 }
