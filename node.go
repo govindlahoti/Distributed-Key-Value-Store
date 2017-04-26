@@ -19,17 +19,17 @@ import (
 
 type Node struct {
 	
-	fingerTable []string
-	nodeId uint64
+	FingerTable []string
+	NodeId uint64
 
 	// addresses
-	address string
-	successors []string
+	Address string
+	Successors []string
 	// predecessr string
 
-	startRange uint64
-	endRange uint64
-	keyValueStore map[string]string
+	StartRange uint64
+	EndRange uint64
+	KeyValueStore map[string]string
 
 	//log *log.Logger
 }
@@ -37,79 +37,94 @@ type Node struct {
 
 func (node *Node) lookUpFingerTable(key uint64) string {
 
+	// fmt.Println("lookUpFingerTable called with key =", key)
 	var target uint64
-	if key > node.nodeId {
-		target = uint64(math.Log2(float64(key - node.nodeId)))
+	if key > node.NodeId {
+		target = uint64(math.Log2(float64(key - node.NodeId)))
 	} else {
-		target = uint64(math.Log2(float64(key + (uint64(1)<<32) - node.nodeId)))
+		target = uint64(math.Log2(float64(key + (uint64(1)<<32) - node.NodeId)))
 	}
-	fmt.Println(target,",",len(node.fingerTable),',',node.fingerTable[target])
+	
 	var targetLookUp string
 
-	client,err := getClient(node.fingerTable[target])
-	if err==nil {
-		err=client.Call("Node.IpLookUp", key, &targetLookUp)
-	}
-	fmt.Println(target)
+	// fmt.Println("Found the location for next hop =", node.FingerTable[target])
+	// fmt.Println("Will contact it")
+	client, err := getClient(node.FingerTable[target])
 
+	if err == nil {
+		err = client.Call("Node.IpLookUp", key, &targetLookUp)
+	}
+	
 	for err != nil {
-		fmt.Println(err)
+		// fmt.Println("Problem contacting it")
 		target = (target - 1 + 32) % 32
-		client,err := getClient(node.fingerTable[target])
-		if err==nil {
-			err=client.Call("Node.IpLookUp", key, &targetLookUp)
+		// fmt.Println("Found the location for previous best hop =", node.FingerTable[target])
+		// fmt.Println("Will contact it")
+		client, err := getClient(node.FingerTable[target])
+		if err == nil {
+			err = client.Call("Node.IpLookUp", key, &targetLookUp)
 		}
 	}
 
+	// fmt.Println("Final destination for", key, "was found to be at", targetLookUp)
 	return targetLookUp
 }
 
 func (node *Node) IpLookUp (key uint64, addr *string) error {
 	
-	if key >= node.startRange && key <= node.endRange {
-		fmt.Println("base case :)")
-		*addr = node.address
+	// fmt.Println("IpLookUp called with key =", key)
+	
+	if key >= node.StartRange && key <= node.EndRange {
+		*addr = node.Address 
 	} else{
 		*addr = node.lookUpFingerTable(key)
 	}
 
+	// fmt.Println("IpLookUp returns the destination =", *addr)
 	return nil
 }
 
 func (node *Node) LookUp(key string, value *string) error {
 	
+	fmt.Println("LookUp called for key =", key)
 	var err error
 	var client *rpc.Client
-	err=nil
+	err = nil
 	hash := consistentHash(key)
-	if hash >= node.startRange && hash <= node.endRange {
-		*value = node.keyValueStore[key]
+	if hash >= node.StartRange && hash <= node.EndRange {
+		*value = node.KeyValueStore[key]
 	} else {
 		var targetIp string
 		node.IpLookUp(hash, &targetIp)
 		client,err=getClient(targetIp)
-		if err==nil{
+		if err == nil{
 			err=client.Call("Node.LookUp", key, value)
 		}
 	}
 
+	fmt.Println("Lookup resulted into value =", *value)
 	return err
 }
 
-func (node *Node) UpdateKey(key string, value *string) error {
+func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	
+	fmt.Println("Add request came for key =", keyValue[0], "value =", keyValue[1])
+
 	var err error
 	var client *rpc.Client
-	err=nil
-	hash := consistentHash(key)
-	if hash >= node.startRange && hash <= node.endRange {
-		node.keyValueStore[key]=*value
+	err = nil
+
+	hash := consistentHash(keyValue[0])
+
+	if hash >= node.StartRange && hash <= node.EndRange {
+		node.KeyValueStore[keyValue[0]] = keyValue[1]
+		fmt.Println("Added - ", keyValue[0], ": ", keyValue[1])
 	} else {
 		var targetIp string
 		node.IpLookUp(hash, &targetIp)
-		client,err=getClient(targetIp)
-		if err==nil{
-			err=client.Call("Node.LookUp", key, value)
+		client,err = getClient(targetIp)
+		if err == nil{
+			err = client.Call("Node.UpdateKey", keyValue, dummy)
 		}
 	}
 
@@ -118,30 +133,37 @@ func (node *Node) UpdateKey(key string, value *string) error {
 
 func (node *Node) updateFingerTable() {
 
-	fmt.Println("here in updateFingerTable")
-	node.fingerTable[0] = node.successors[0]
-	fmt.Println("here in updateFingerTable first reference")
+	// fmt.Println("Periodic Fingure Table Update")
+	node.FingerTable[0] = node.Successors[0]
+	
 	for i := 1; i < 32; i++ {
 		var target string
-		node.IpLookUp(node.nodeId + (uint64(1)<<uint(i)), &target)
-		fmt.Println("here in updateFingerTable reference")
-		node.fingerTable[i] = target
-		fmt.Println("here in updateFingerTable reference")
+		node.IpLookUp((node.NodeId + power2(i)) % power2(32), &target)
+		node.FingerTable[i] = target
 	}
 
 }
 
+func (node *Node) init() {
+	node.FingerTable = make([]string, 32)
+	node.Successors = make([]string, 1)
+	node.KeyValueStore = make(map[string]string)
+}
+
 func (node *Node) Join(addr string, newnode *Node) error {
 	// TODO Search for node with most need
-	var temp Node
 
-	newnode.nodeId = node.nodeId
-	newnode.startRange = (node.startRange + node.endRange)/2 + 1
-	newnode.endRange = newnode.nodeId
-	newnode.address = addr
+	newnode.init()
+	fmt.Println(newnode.Successors)
+	fmt.Println(newnode.FingerTable)
+	newnode.NodeId = node.NodeId
+	newnode.StartRange = (node.StartRange + node.EndRange)/2 + 1
+	newnode.EndRange = newnode.NodeId
+	newnode.Address = addr
 	
-	copy(newnode.successors, node.successors)
-	copy(newnode.fingerTable, node.fingerTable)
+	copy(newnode.Successors, node.Successors)
+	copy(newnode.FingerTable, node.FingerTable)
+
 	// hashes = make([]uint64)
 	// for k,v := range keyValueStore {
 	// 	hashes = append(hashes,consistentHash(k))
@@ -155,19 +177,22 @@ func (node *Node) Join(addr string, newnode *Node) error {
 
 	/* pass finger table */
 	/* start end range */
-	temp.nodeId = (node.startRange + node.endRange)/2
-	temp.endRange = temp.nodeId
-	copy(temp.fingerTable, node.fingerTable)
-	copy(temp.successors[1:], temp.successors[0:])
-	temp.successors[0] = addr
 	
+	var temp Node
+	temp.init()
+	temp.NodeId = (node.StartRange + node.EndRange)/2
+	temp.StartRange = node.StartRange
+	temp.EndRange = temp.NodeId
+	copy(temp.FingerTable, node.FingerTable)
+	copy(temp.Successors[1:], temp.Successors[0:])
+	temp.Successors[0] = addr
 
-	temp.fingerTable[0] = temp.successors[0]
-
-	var i uint
-	for i = 1; i < 32; i++ {
-		if temp.nodeId + (uint64(1)<<i) <= newnode.nodeId {
-			temp.fingerTable[i] = temp.successors[0]
+	// create a new fingure table
+	var i int
+	for i = 0; i < 32; i++ {
+		if temp.NodeId + power2(i) <= newnode.NodeId {
+			temp.FingerTable[i] = temp.Successors[0]
+			// fmt.Println(i,temp.NodeId,temp.NodeId + power2(i),newnode.NodeId)
 		} else {
 			break
 		}
@@ -175,42 +200,41 @@ func (node *Node) Join(addr string, newnode *Node) error {
 
 	for ; i < 32; i++ {
 		var target string
-		temp.IpLookUp(temp.nodeId + (uint64(1)<<i), &target)
-		temp.fingerTable[i] = target
+		temp.IpLookUp((temp.NodeId + power2(i)) % power2(32), &target)
+		temp.FingerTable[i] = target
 	}
 
 	
 	/* key val store distributed */
-	newnode.keyValueStore = make(map[string]string)
-	for k, v := range node.keyValueStore {
-		if consistentHash(k) > temp.nodeId {
-			newnode.keyValueStore[k] = v
+	newnode.KeyValueStore = make(map[string]string)
+	for k, v := range node.KeyValueStore {
+		if consistentHash(k) > temp.NodeId {
+			newnode.KeyValueStore[k] = v
 		} 
 	}
 
-	for k,_ := range newnode.keyValueStore {
-		delete(node.keyValueStore, k)
+	for k,_ := range newnode.KeyValueStore {
+		delete(node.KeyValueStore, k)
 	}
 
-	node.nodeId = temp.nodeId
-	node.startRange = temp.startRange
-	node.endRange = temp.endRange
-	node.fingerTable = temp.fingerTable
-	node.successors = temp.successors
+	fmt.Println(temp)
+	fmt.Println(newnode)
+	node.NodeId = temp.NodeId
+	node.StartRange = temp.StartRange
+	node.EndRange = temp.EndRange
+	node.FingerTable = temp.FingerTable
+	node.Successors = temp.Successors
 
 	return nil
 }
 
 func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
-	// fmt.Println(*successors);
-	// fmt.Println(node.successors);
-	*successors = make([]string, len(node.successors))
-	copy(*successors, node.successors);
+
+	*successors = make([]string, len(node.Successors))
+	copy(*successors, node.Successors);
 	fmt.Println(*successors);
-	// fmt.Println("here");
 	copy((*successors)[1:], (*successors)[0:]);
-	(*successors)[0] = node.address
-	// fmt.Println("here after copy");
+	(*successors)[0] = node.Address
 	return nil
 }
 
@@ -218,33 +242,43 @@ func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
 
 func (node *Node) Leave(addr string, newnode *Node) error {
 	// TODO send to successor
-	node.startRange = newnode.startRange
-	for k, v := range newnode.keyValueStore {
-		node.keyValueStore[k] = v
+	node.StartRange = newnode.StartRange
+	for k, v := range newnode.KeyValueStore {
+		node.KeyValueStore[k] = v
 	}
 	return nil
 }
 
 func (node *Node) periodicUpdater() {
-	fmt.Println("here in periodicUpdater")
+
 	for true {
 
-		for i := 0; i < len(node.successors); i++ {
-			// fmt.Println("here in periodicUpdater i=",i)
-			client,err:=getClient(node.successors[i])
-			if err==nil{
-				err=client.Call("Node.UpdateSuccessors", node.address, &node.successors)
+		for i := 0; i < len(node.Successors); i++ {
+			client, err := getClient(node.Successors[i])
+			if err == nil{
+				err = client.Call("Node.UpdateSuccessors", node.Address, &node.Successors)
 			}
 			if err == nil {
 				break
 			}
 		}
-		
-		fmt.Println("here in periodicUpdater after successors update")
 		node.updateFingerTable()
-		fmt.Println("here in periodicUpdater finger table upto date update")
+		node.printFingerTable()
+		node.printDetails()
 		time.Sleep(10000 * time.Millisecond)
 	}
+}
+
+func (node *Node) printDetails() {
+	fmt.Println("Range = [", node.StartRange, ",", node.EndRange, "]")
+}
+
+func (node *Node) printFingerTable(){
+	fmt.Println("------Finger Table------")
+	for i:=0;i<32;i++ {
+		fmt.Println((node.NodeId+power2(i))%power2(32),node.FingerTable[i])
+	}
+	fmt.Println("-------------------------")
 }
 
 func tcpServer(port string){
@@ -270,7 +304,6 @@ func tcpServer(port string){
 	}
 }
 
-
 func main() {
 	// tcpServer()
 
@@ -284,29 +317,33 @@ func main() {
 	defer logfile.Close()*/
 			
 	/* setup master node */
-	masterNode := new(Node)
-	if(strings.Compare(os.Args[2],"master")==0){
-		fmt.Println("here in master node creation")
-		//masterNode.log = logg
-		masterNode.fingerTable = make([]string, 32)
-		masterNode.successors = make([]string,1)
-		masterNode.successors[0]=os.Args[1]
-		masterNode.startRange = 0
-		masterNode.endRange = (uint64(1)<<32)-1
-		masterNode.address=os.Args[1]
-		masterNode.nodeId=(uint64(1)<<32)-1
-		masterNode.keyValueStore = make(map[string]string)
+	
+	node := new(Node)
+	node.init()
+	fmt.Println(node)	
+	if(strings.Compare(os.Args[2], "master") == 0) {
+		// fmt.Println("here in master node creation")
+		//node.log = logg
+		node.Successors[0] = os.Args[1]
+		node.StartRange = 0
+		node.EndRange = power2(32) - 1
+		node.Address = os.Args[1]
+		node.NodeId = power2(32) - 1
 		fmt.Println("here in master node creation done")
 	} else {
-		client,err:=getClient(os.Args[3])
-		if err==nil{
-			err=client.Call("Node.Join",os.Args[1],masterNode)
-		}
-		if err != nil {
+		client,err:=getClient(os.Args[2])
+		var newnode Node
+		newnode.init()
+		if err == nil {
+			err=client.Call("Node.Join", os.Args[1], &newnode)
+			*node=newnode
+		} else {
 			log.Fatal("Unable to join.");
 		}
+		fmt.Println(node)
 	}
-	rpc.Register(masterNode)
-	go masterNode.periodicUpdater()
+	
+	rpc.Register(node)
+	go node.periodicUpdater()
 	tcpServer(os.Args[1])
 }

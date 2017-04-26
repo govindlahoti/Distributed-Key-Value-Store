@@ -25,9 +25,13 @@ func getClient(addr string) (*rpc.Client,error) {
 	client, err := jsonrpc.Dial("tcp", addr)
 	
 	if err != nil {
-		fmt.Println("error in rpc call",err)
-		client=nil
+		fmt.Println("error in rpc call", err)
+		client = nil
 	}
 
-	return client,err
+	return client, err
+}
+
+func power2(power int) uint64 {
+	return (uint64(1) << uint(power))
 }
