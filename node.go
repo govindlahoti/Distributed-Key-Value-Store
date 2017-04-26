@@ -12,6 +12,8 @@ import (
 	"net/rpc"
 	"os"
 	"time"
+	"log"
+	"strings"
 )
 
 
@@ -29,6 +31,7 @@ type Node struct {
 	endRange uint64
 	keyValueStore map[string]string
 
+	log *log.Logger
 }
 
 
@@ -79,7 +82,21 @@ func (node *Node) LookUp(key string, value *string) error {
 	return nil
 }
 
-func (node *Node) UpdateFingerTable() {
+func (node *Node) UpdateKey(key string, value *string) error {
+	
+	hash := consistentHash(key)
+	if hash >= node.startRange && hash <= node.endRange {
+		node.keyValueStore[key]=*value
+	} else {
+		var targetIp string
+		node.IpLookUp(hash, &targetIp)
+		getClient(targetIp).Call("Node.LookUp", key, value)
+	}
+
+	return nil
+}
+
+func (node *Node) updateFingerTable() {
 
 	node.fingerTable[0] = node.successors[0]
 	for i := 1; i < 32; i++ {
@@ -160,10 +177,10 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	return nil
 }
 
-func (node *Node) UpdateSuccessors(addr string, successors []string) error {
-	copy(successors, node.successors);
-	copy(successors[1:], successors[0:]);
-	successors[0] = node.address
+func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
+	copy(*successors, node.successors);
+	copy((*successors)[1:], (*successors)[0:]);
+	(*successors)[0] = node.address
 	return nil
 }
 
@@ -179,6 +196,7 @@ func (node *Node) Leave(addr string, newnode *Node) error {
 }
 
 func (node *Node) periodicUpdater() {
+	fmt.Println("")
 	for true {
 
 		for i := 0; i < len(node.successors); i++ {
@@ -187,13 +205,13 @@ func (node *Node) periodicUpdater() {
 				break
 			}
 		}
-		node.UpdateFingerTable()
+		node.updateFingerTable()
 		time.Sleep(1000 * time.Millisecond)
 	}
 }
 
 func tcpServer(port string){
-	addr, err := net.ResolveTCPAddr("tcp", ":"+port)
+	addr, err := net.ResolveTCPAddr("tcp", port)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -218,8 +236,35 @@ func tcpServer(port string){
 
 func main() {
 	// tcpServer()
+
+	/* creating the log file */
+	logfile, err := os.OpenFile(os.Args[1]+".log",  os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logg := log.New(logfile, "", log.Ltime)
+	if err != nil {
+	    fmt.Println("File does not exists or cannot be created and unable to create log")
+	    os.Exit(1)
+	}
+	defer logfile.Close()
+			
+	/* setup master node */
 	masterNode := new(Node)
-	masterNode.fingerTable = make([]string, 32)
+	if(strings.Compare(os.Args[2],"master")==0){
+		masterNode.log = logg
+		masterNode.fingerTable = make([]string, 32)
+		masterNode.successors = make([]string,2)
+		masterNode.successors[0]=os.Args[1]
+		masterNode.successors[1]=os.Args[1]
+		masterNode.startRange = 0
+		masterNode.endRange = (uint64(1)<<32)-1
+		masterNode.address=os.Args[1]
+		masterNode.nodeId=(uint64(1)<<32)-1
+		masterNode.keyValueStore = make(map[string]string)
+	} else {
+		err := getClient(os.Args[3]).Call("Node.Join",os.Args[1],masterNode)
+		if err != nil {
+			log.Fatal("Unable to join.");
+		}
+	}
 	rpc.Register(masterNode)
 	go masterNode.periodicUpdater()
 	tcpServer(os.Args[1])
