@@ -2,7 +2,7 @@ package main
 	
 import (
 	"fmt"
-	"net/rpc/jsonrpc"
+	"net/rpc"
 	// "strings"
 	// "bufio"
 	"time"
@@ -13,8 +13,8 @@ import (
 var cnt int64
 var lock sync.Mutex
 
-func user() {
-	client, err := jsonrpc.Dial("tcp", os.Args[1])
+func user(addr string) {
+	client, err := rpc.DialHTTP("tcp", addr)
 	
 	if err != nil {
 		fmt.Println(err)
@@ -44,8 +44,8 @@ func main() {
 	cnt = 0
 	lock = sync.Mutex{}
 
-	for i := 0; i < 100 ; i++ {
-		go user()
+	for i := 0; i < 500 ; i++ {
+		go user(os.Args[1+(i%(len(os.Args)-1))])
 	}
 
 	t := time.Now()
@@ -60,7 +60,7 @@ func main() {
 		lock.Lock()
 		fmt.Println(cnt * 1000000000.0 / (nanos1 - nanos) )
 
-		if cnt > 1000 {
+		if cnt > 10000 {
 			cnt = 0
 			t = time.Now()
 			nanos = t.UnixNano()

@@ -2,9 +2,9 @@ package main
 
 import (
 	"crypto/sha256"
-	"net/rpc/jsonrpc"
+	// "net/rpc/jsonrpc"
 	"net/rpc"
-	"fmt"
+	// "fmt"
 	"math/rand"
 	"strconv"
 )
@@ -24,10 +24,10 @@ func consistentHash(s string) uint64 {
 }
 
 func getClient(addr string) (*rpc.Client,error) {
-	client, err := jsonrpc.Dial("tcp", addr)
+	client, err := rpc.DialHTTP("tcp", addr)
 	
 	if err != nil {
-		fmt.Println("error in rpc call", err)
+		// fmt.Println("error in rpc call", err)
 		client = nil
 	}
 

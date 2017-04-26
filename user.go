@@ -1,19 +1,14 @@
 package main
-	
+
 import (
 	"fmt"
-	"net/rpc/jsonrpc"
+	"net/rpc"
 	"strings"
 	"bufio"
 	"os"
 )
 
 func main() {
-	client, err := jsonrpc.Dial("tcp", os.Args[1])
-	if err != nil {
-		fmt.Println(err)
-	}
-
 	for true {
 		fmt.Print(">>>> ")
 	    scanner := bufio.NewScanner(os.Stdin)
@@ -22,16 +17,22 @@ func main() {
 	    	s := scanner.Text()
 	    	cmds := strings.Fields(s)
 
-		    switch cmds[0] {
+    		client, err := rpc.DialHTTP("tcp", cmds[0])
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+
+		  	switch cmds[1] {
 		    	case "add":
 
-		    		if len(cmds) != 3 {
+		    		if len(cmds) != 4 {
 		    			fmt.Println("Wrong format")
 		    			continue
 		    		}
 
 		    		var dummy int
-		    		err = client.Call("Node.UpdateKey", cmds[1:3], &dummy)
+		    		err = client.Call("Node.UpdateKey", cmds[2:4], &dummy)
 
 		    		if err != nil {
 		    			fmt.Println(err)
@@ -41,19 +42,50 @@ func main() {
 
 		    	case "look":
 
-		    		if len(cmds) != 2 {
+		    		if len(cmds) != 3 {
 		    			fmt.Println("Wrong format")
 		    			continue
 		    		}
 
 		    		var value string 
-					err = client.Call("Node.LookUp", cmds[1], &value)
+					err = client.Call("Node.LookUp", cmds[2], &value)
 
 		    		if err != nil {
 		    			fmt.Println(err)
 		    		} else {
-		    			fmt.Println(cmds[1] + ": " +value)
+		    			fmt.Println(cmds[2] + ": " +value)
 		    		}
+	    		case "leave":
+
+		    		if len(cmds) != 2 {
+		    			fmt.Println("Wrong format")
+		    			continue
+		    		}
+
+		    		var dummy string 
+					err = client.Call("Node.DoLeave", dummy, &dummy)
+
+		    		if err != nil {
+		    			fmt.Println(err)
+		    		} else {
+		    			fmt.Println("Node Leave Successful")
+		    		}
+	    		case "del":
+
+		    		if len(cmds) != 3 {
+		    			fmt.Println("Wrong format")
+		    			continue
+		    		}
+
+		    		var dummy int 
+					err = client.Call("Node.DeleteKey", cmds[2], &dummy)
+
+		    		if err != nil {
+		    			fmt.Println(err)
+		    		} else {
+		    			fmt.Println("Delete Successful")
+		    		}
+
 		    }
 		    fmt.Print(">>>> ")
 	    }

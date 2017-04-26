@@ -5,7 +5,7 @@ import (
 	// "errors"
 	"net"
 	// "time"
-	// "net/rpc"
+	"net/http"
 	"net/rpc/jsonrpc"
 	"math"
 	// "sort"
@@ -67,7 +67,7 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 		target = (target - 1 + 32) % 32
 		// fmt.Println("Found the location for previous best hop =", node.FingerTable[target])
 		// fmt.Println("Will contact it")
-		node.printFingerTable()
+		// node.printFingerTable()
 		nodelock.Lock()
 		finger = node.FingerTable[target]
 		nodelock.Unlock()
@@ -101,7 +101,7 @@ func (node *Node) IpLookUp (key uint64, addr *string) error {
 
 func (node *Node) LookUp(key string, value *string) error {
 	
-	// fmt.Println("LookUp called for key =", key)
+	fmt.Println("LookUp called for key =", key)
 	var err error
 	var client *rpc.Client
 	err = nil
@@ -111,7 +111,8 @@ func (node *Node) LookUp(key string, value *string) error {
 	if node.inRange(hash) {
 		*value = node.KeyValueStore[key]
 		nodelock.Unlock()
-		time.Sleep(1000 * time.Millisecond)
+		fmt.Println("Lookup resulted into value =", *value)
+		// time.Sleep(100 * time.Millisecond)
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -123,13 +124,12 @@ func (node *Node) LookUp(key string, value *string) error {
 		}
 	}
 
-	// fmt.Println("Lookup resulted into value =", *value)
 	return err
 }
 
 func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	
-	fmt.Println("Add request came for key =", keyValue[0], "value =", keyValue[1])
+	fmt.Println("Add request came for key =", keyValue[0], ", value =", keyValue[1])
 
 	var err error
 	var client *rpc.Client
@@ -141,8 +141,8 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	if node.inRange(hash) {
 		node.KeyValueStore[keyValue[0]] = keyValue[1]
 		nodelock.Unlock()
-		time.Sleep(1000 * time.Millisecond)
-		fmt.Println("Added - ", keyValue[0], ": ", keyValue[1])
+		// time.Sleep(100 * time.Millisecond)
+		fmt.Println("Added key =", keyValue[0], ", value =", keyValue[1])
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -156,6 +156,37 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 
 	return err
 }
+
+func (node *Node) DeleteKey(key string, dummy *int) error {
+	
+	fmt.Println("Delete request came for key =", key)
+
+	var err error
+	var client *rpc.Client
+	err = nil
+
+	hash := consistentHash(key)
+
+	nodelock.Lock()
+	if node.inRange(hash) {
+		delete(node.KeyValueStore,key)
+		nodelock.Unlock()
+		// time.Sleep(100 * time.Millisecond)
+		fmt.Println("Deleted key =", key)
+	} else {
+		nodelock.Unlock()
+		var targetIp string
+		node.IpLookUp(hash, &targetIp)
+		client, err = getClient(targetIp)
+		if err == nil{
+			err = client.Call("Node.DeleteKey", key, dummy)
+			client.Close()
+		}
+	}
+	
+	return err
+}
+
 
 func (node *Node) updateFingerTable() {
 
@@ -180,11 +211,12 @@ func (node *Node) init() {
 }
 
 func (node *Node) Join(addr string, newnode *Node) error {
+	fmt.Println("Joining new node :",addr,"...")
 	// TODO Search for node with most need
 
 	newnode.init()
-	fmt.Println(newnode.Successors)
-	fmt.Println(newnode.FingerTable)
+	// fmt.Println(newnode.Successors)
+	// fmt.Println(newnode.FingerTable)
 
 	nodelock.Lock()
 	newnode.NodeId = node.NodeId
@@ -252,8 +284,8 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	}
 
 
-	fmt.Println("In join node is temp Successors=",temp.Successors,"FingerTable=",temp.FingerTable)
-	fmt.Println("In join node is temp Successors=",newnode.Successors,"FingerTable=",newnode.FingerTable)
+	// fmt.Println("In join node is temp Successors=",temp.Successors,"FingerTable=",temp.FingerTable)
+	// fmt.Println("In join node is temp Successors=",newnode.Successors,"FingerTable=",newnode.FingerTable)
 	node.NodeId = temp.NodeId
 	node.StartRange = temp.StartRange
 	node.EndRange = temp.EndRange
@@ -269,7 +301,7 @@ func (node *Node) UpdateSuccessors(end uint64, successors *[]string) error {
 	
 	*successors = make([]string, len(node.Successors))
 	copy(*successors, node.Successors);
-	fmt.Println(*successors);
+	// fmt.Println(*successors);
 	copy((*successors)[1:], (*successors)[0:]);
 	(*successors)[0] = node.Address
 
@@ -282,15 +314,35 @@ func (node *Node) UpdateSuccessors(end uint64, successors *[]string) error {
 	return nil
 }
 
+func (node *Node)  DoLeave(reason string, dummy *string) error {
+	nodelock.Lock()
+	succ := node.Successors[0]
+	nodelock.Unlock()
 
+	client,err := getClient(succ)
+	if err == nil {
+		nodelock.Lock()
+		temp := node
+		nodelock.Unlock()
+		var dummy string
+		err = client.Call("Node.Leave",temp,&dummy)
+	}
 
-func (node *Node) Leave(addr string, newnode *Node) error {
+	fmt.Println("Node Leave executed...")
+	os.Exit(0)
+	return err
+}
+
+func (node *Node) Leave(newnode *Node, dummy *string) error {
 	// TODO send to successor
 	nodelock.Lock()
 	node.StartRange = newnode.StartRange
 	for k, v := range newnode.KeyValueStore {
 		node.KeyValueStore[k] = v
 	}
+	fmt.Println("Node Leave executed...")
+	fmt.Println("Key Values received:")
+	fmt.Println(newnode.KeyValueStore)
 	nodelock.Unlock()
 	return nil
 }
@@ -406,7 +458,7 @@ func main() {
 	
 	node := new(Node)
 	node.init()
-	fmt.Println(node)
+	// fmt.Println(node)
 
 	if(strings.Compare(os.Args[2], "master") == 0) {
 		// fmt.Println("here in master node creation")
@@ -416,7 +468,7 @@ func main() {
 		node.EndRange = power2(32) - 1
 		node.Address = os.Args[1]
 		node.NodeId = power2(32) - 1
-		fmt.Println("here in master node creation done")
+		fmt.Println("Key Store initialized...")
 	} else {
 		client, err := getClient(os.Args[2])
 		var newnode Node
@@ -427,12 +479,20 @@ func main() {
 			client.Close()
 			*node = newnode
 		} else {
-			log.Fatal("Unable to join.");
+			log.Fatal("Unable to join!");
 		}
-		fmt.Println(node)
+		fmt.Println("-----Initial Key Value Store------\n",node.KeyValueStore)
 	}
 	
 	rpc.Register(node)
+	rpc.HandleHTTP()
 	go node.periodicUpdater()
-	tcpServer(os.Args[1])
+	// tcpServer(os.Args[1])
+
+	l, e := net.Listen("tcp", os.Args[1])
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	fmt.Println("Listening...")
+	http.Serve(l, nil)
 }
