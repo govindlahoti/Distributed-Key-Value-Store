@@ -31,7 +31,7 @@ type Node struct {
 	endRange uint64
 	keyValueStore map[string]string
 
-	log *log.Logger
+	//log *log.Logger
 }
 
 
@@ -46,13 +46,19 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 	fmt.Println(target,",",len(node.fingerTable),',',node.fingerTable[target])
 	var targetLookUp string
 
-	err := getClient(node.fingerTable[target]).Call("Node.IpLookUp", key, &targetLookUp)
+	client,err := getClient(node.fingerTable[target])
+	if err==nil {
+		err=client.Call("Node.IpLookUp", key, &targetLookUp)
+	}
 	fmt.Println(target)
 
 	for err != nil {
 		fmt.Println(err)
 		target = (target - 1 + 32) % 32
-		err = getClient(node.fingerTable[target]).Call("Node.IpLookUp", key, &targetLookUp)
+		client,err := getClient(node.fingerTable[target])
+		if err==nil {
+			err=client.Call("Node.IpLookUp", key, &targetLookUp)
+		}
 	}
 
 	return targetLookUp
@@ -72,30 +78,42 @@ func (node *Node) IpLookUp (key uint64, addr *string) error {
 
 func (node *Node) LookUp(key string, value *string) error {
 	
+	var err error
+	var client *rpc.Client
+	err=nil
 	hash := consistentHash(key)
 	if hash >= node.startRange && hash <= node.endRange {
 		*value = node.keyValueStore[key]
 	} else {
 		var targetIp string
 		node.IpLookUp(hash, &targetIp)
-		getClient(targetIp).Call("Node.LookUp", key, value)
+		client,err=getClient(targetIp)
+		if err==nil{
+			err=client.Call("Node.LookUp", key, value)
+		}
 	}
 
-	return nil
+	return err
 }
 
 func (node *Node) UpdateKey(key string, value *string) error {
 	
+	var err error
+	var client *rpc.Client
+	err=nil
 	hash := consistentHash(key)
 	if hash >= node.startRange && hash <= node.endRange {
 		node.keyValueStore[key]=*value
 	} else {
 		var targetIp string
 		node.IpLookUp(hash, &targetIp)
-		getClient(targetIp).Call("Node.LookUp", key, value)
+		client,err=getClient(targetIp)
+		if err==nil{
+			err=client.Call("Node.LookUp", key, value)
+		}
 	}
 
-	return nil
+	return err
 }
 
 func (node *Node) updateFingerTable() {
@@ -213,7 +231,10 @@ func (node *Node) periodicUpdater() {
 
 		for i := 0; i < len(node.successors); i++ {
 			// fmt.Println("here in periodicUpdater i=",i)
-			err := getClient(node.successors[i]).Call("Node.UpdateSuccessors", node.address, &node.successors)
+			client,err:=getClient(node.successors[i])
+			if err==nil{
+				err=client.Call("Node.UpdateSuccessors", node.address, &node.successors)
+			}
 			if err == nil {
 				break
 			}
@@ -222,7 +243,7 @@ func (node *Node) periodicUpdater() {
 		fmt.Println("here in periodicUpdater after successors update")
 		node.updateFingerTable()
 		fmt.Println("here in periodicUpdater finger table upto date update")
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(10000 * time.Millisecond)
 	}
 }
 
@@ -254,19 +275,19 @@ func main() {
 	// tcpServer()
 
 	/* creating the log file */
-	logfile, err := os.OpenFile(os.Args[1]+".log",  os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	/*logfile, err := os.OpenFile(os.Args[1]+".log",  os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	logg := log.New(logfile, "", log.Ltime)
 	if err != nil {
 	    fmt.Println("File does not exists or cannot be created and unable to create log")
 	    os.Exit(1)
 	}
-	defer logfile.Close()
+	defer logfile.Close()*/
 			
 	/* setup master node */
 	masterNode := new(Node)
 	if(strings.Compare(os.Args[2],"master")==0){
 		fmt.Println("here in master node creation")
-		masterNode.log = logg
+		//masterNode.log = logg
 		masterNode.fingerTable = make([]string, 32)
 		masterNode.successors = make([]string,1)
 		masterNode.successors[0]=os.Args[1]
@@ -277,7 +298,10 @@ func main() {
 		masterNode.keyValueStore = make(map[string]string)
 		fmt.Println("here in master node creation done")
 	} else {
-		err := getClient(os.Args[3]).Call("Node.Join",os.Args[1],masterNode)
+		client,err:=getClient(os.Args[3])
+		if err==nil{
+			err=client.Call("Node.Join",os.Args[1],masterNode)
+		}
 		if err != nil {
 			log.Fatal("Unable to join.");
 		}

@@ -21,12 +21,13 @@ func consistentHash(s string) uint64 {
 	return hash
 }
 
-func getClient(addr string) *rpc.Client {
+func getClient(addr string) (*rpc.Client,error) {
 	client, err := jsonrpc.Dial("tcp", addr)
 	
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println("error in rpc call",err)
+		client=nil
 	}
 
-	return client
+	return client,err
 }
