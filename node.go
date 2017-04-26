@@ -127,6 +127,15 @@ func (node *Node) LookUp(key string, value *string) error {
 	return err
 }
 
+
+func (node *Node) ForceUpdateKey(keyValue []string, dummy *int) error {
+	nodelock.Lock()
+	node.KeyValueStore[keyValue[0]] = keyValue[1]
+	nodelock.Unlock()
+	fmt.Println("Added key =", keyValue[0], ", value =", keyValue[1])
+	return nil
+}
+
 func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	
 	fmt.Println("Add request came for key =", keyValue[0], ", value =", keyValue[1])
@@ -143,6 +152,27 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 		nodelock.Unlock()
 		// time.Sleep(100 * time.Millisecond)
 		fmt.Println("Added key =", keyValue[0], ", value =", keyValue[1])
+
+		// updates in replicas
+		nodelock.Lock()
+		ownAddress := node.Address
+		nodelock.Unlock()
+
+		for i := 0; i < 5; i++ {
+			nodelock.Lock()
+			succ := node.Successors[i]
+			nodelock.Unlock()
+
+			if succ == ownAddress {
+				break
+			}
+
+			client, err = getClient(succ)
+			if err == nil {
+				var dummy int
+				client.Call("Node.ForceUpdateKey", keyValue, &dummy)
+			}
+		}
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -155,6 +185,15 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	}
 
 	return err
+}
+
+func (node *Node) ForceDelete(key string, dummy *int) error {
+	nodelock.Lock()
+	delete(node.KeyValueStore, key)
+	nodelock.Unlock()
+
+	fmt.Println("Deleted key =", key)
+	return nil
 }
 
 func (node *Node) DeleteKey(key string, dummy *int) error {
@@ -173,6 +212,28 @@ func (node *Node) DeleteKey(key string, dummy *int) error {
 		nodelock.Unlock()
 		// time.Sleep(100 * time.Millisecond)
 		fmt.Println("Deleted key =", key)
+
+		// delete from replicas
+		nodelock.Lock()
+		ownAddress := node.Address
+		nodelock.Unlock()
+
+		for i := 0; i < 5; i++ {
+			nodelock.Lock()
+			succ := node.Successors[i]
+			nodelock.Unlock()
+
+			if succ == ownAddress {
+				break
+			}
+
+			client, err = getClient(succ)
+			if err == nil {
+				var dummy int
+				client.Call("Node.ForceDelete", key, &dummy)
+			}
+		}
+
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -334,7 +395,7 @@ func (node *Node)  DoLeave(reason string, dummy *string) error {
 }
 
 func (node *Node) Leave(newnode *Node, dummy *string) error {
-	// TODO send to successor
+	
 	nodelock.Lock()
 	node.StartRange = newnode.StartRange
 	for k, v := range newnode.KeyValueStore {
