@@ -18,6 +18,11 @@ import (
 )
 
 
+type Msg struct {
+	address string
+	msg 	[]string
+}
+
 type Node struct {
 	
 	FingerTable []string
@@ -29,7 +34,9 @@ type Node struct {
 	StartRange uint64
 	EndRange uint64
 	KeyValueStore map[string]string
+	connections map[string]*rpc.Client
 
+	msgQueue []Msg
 }
 
 var nodelock sync.Mutex
@@ -132,7 +139,7 @@ func (node *Node) ForceUpdateKey(keyValue []string, dummy *int) error {
 	nodelock.Lock()
 	node.KeyValueStore[keyValue[0]] = keyValue[1]
 	nodelock.Unlock()
-	fmt.Println("Added key =", keyValue[0], ", value =", keyValue[1])
+	fmt.Println("(Replication) Added key =", keyValue[0], ", value =", keyValue[1])
 	return nil
 }
 
@@ -149,30 +156,45 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	nodelock.Lock()
 	if node.inRange(hash) {
 		node.KeyValueStore[keyValue[0]] = keyValue[1]
-		nodelock.Unlock()
-		// time.Sleep(100 * time.Millisecond)
+		// nodelock.Unlock()
+		// // time.Sleep(100 * time.Millisecond)
 		fmt.Println("Added key =", keyValue[0], ", value =", keyValue[1])
 
-		// updates in replicas
-		nodelock.Lock()
-		ownAddress := node.Address
-		nodelock.Unlock()
+		// // updates in replicas
+		// nodelock.Lock()
+		// ownAddress := node.Address
+		// nodelock.Unlock()
 
-		for i := 0; i < 5; i++ {
-			nodelock.Lock()
-			succ := node.Successors[i]
-			nodelock.Unlock()
+		// for i := 0; i < 5; i++ {
+		// 	nodelock.Lock()
+		// 	succ := node.Successors[i]
+		// 	nodelock.Unlock()
 
-			if succ == ownAddress {
+		// 	if succ == ownAddress {
+		// 		break
+		// 	}
+
+		// 	client, err = getClient(succ)
+		// 	if err == nil {
+		// 		var dummy int
+		// 		client.Call("Node.ForceUpdateKey", keyValue, &dummy)
+		// 	}
+		// }
+		var msg Msg;
+		msg.msg = make([]string,2)
+		copy(msg.msg,keyValue)
+		
+		msg.address = node.Address
+		// node.msgQueue = append(node.msgQueue,msg)
+		for i:=0 ; i<5 ;i++ {
+			if strings.Compare(node.Successors[i],node.Address) == 0 {
 				break
 			}
-
-			client, err = getClient(succ)
-			if err == nil {
-				var dummy int
-				client.Call("Node.ForceUpdateKey", keyValue, &dummy)
-			}
+			msg.address = node.Successors[i]
+			node.msgQueue = append(node.msgQueue,msg)
 		}
+		nodelock.Unlock()
+
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -187,12 +209,12 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	return err
 }
 
-func (node *Node) ForceDelete(key string, dummy *int) error {
+func (node *Node) ForceDeleteKey(key string, dummy *int) error {
 	nodelock.Lock()
 	delete(node.KeyValueStore, key)
 	nodelock.Unlock()
 
-	fmt.Println("Deleted key =", key)
+	fmt.Println("(Replication) Deleted key =", key)
 	return nil
 }
 
@@ -209,30 +231,43 @@ func (node *Node) DeleteKey(key string, dummy *int) error {
 	nodelock.Lock()
 	if node.inRange(hash) {
 		delete(node.KeyValueStore,key)
-		nodelock.Unlock()
-		// time.Sleep(100 * time.Millisecond)
+		// nodelock.Unlock()
+		// // time.Sleep(100 * time.Millisecond)
 		fmt.Println("Deleted key =", key)
 
-		// delete from replicas
-		nodelock.Lock()
-		ownAddress := node.Address
-		nodelock.Unlock()
+		// // delete from replicas
+		// nodelock.Lock()
+		// ownAddress := node.Address
+		// nodelock.Unlock()
 
-		for i := 0; i < 5; i++ {
-			nodelock.Lock()
-			succ := node.Successors[i]
-			nodelock.Unlock()
+		// for i := 0; i < 5; i++ {
+		// 	nodelock.Lock()
+		// 	succ := node.Successors[i]
+		// 	nodelock.Unlock()
 
-			if succ == ownAddress {
+		// 	if succ == ownAddress {
+		// 		break
+		// 	}
+
+		// 	client, err = getClient(succ)
+		// 	if err == nil {
+		// 		var dummy int
+		// 		client.Call("Node.ForceDeleteKey", key, &dummy)
+		// 	}
+		// }
+		var msg Msg;
+		msg.msg = make([]string,1)
+		msg.msg[0]=key
+		msg.address = node.Address
+		// node.msgQueue = append(node.msgQueue,msg)
+		for i:=0 ; i<5 ;i++ {
+			if strings.Compare(node.Successors[i],node.Address)==0 {
 				break
 			}
-
-			client, err = getClient(succ)
-			if err == nil {
-				var dummy int
-				client.Call("Node.ForceDelete", key, &dummy)
-			}
+			msg.address = node.Successors[i]
+			node.msgQueue = append(node.msgQueue,msg)
 		}
+		nodelock.Unlock()
 
 	} else {
 		nodelock.Unlock()
@@ -248,7 +283,30 @@ func (node *Node) DeleteKey(key string, dummy *int) error {
 	return err
 }
 
+func (node *Node) updateMsgQueue() {
+	var dummy int
+	for {
+		nodelock.Lock()
+		if len(node.msgQueue)>0 {
+			front := node.msgQueue[0]
+			node.msgQueue = node.msgQueue[1:]
+			nodelock.Unlock()
+			client, err := getClient(front.address)
+			if err == nil{
+				if len(front.msg)==2 {
+					err = client.Call("Node.ForceUpdateKey", front.msg, dummy)
+					client.Close()
+				} else {
+					err = client.Call("Node.ForceDeleteKey", front.msg[0], dummy)
+					client.Close()
+				}
+			}
+		} else {
+			nodelock.Unlock()
+		}
+	}
 
+}
 func (node *Node) updateFingerTable() {
 
 	// fmt.Println("Periodic Fingure Table Update")
@@ -269,6 +327,8 @@ func (node *Node) init() {
 	node.FingerTable = make([]string, 32)
 	node.Successors = make([]string, 10)
 	node.KeyValueStore = make(map[string]string)
+	node.connections = make(map[string]*rpc.Client)
+	node.msgQueue = make([]Msg,0)
 }
 
 func (node *Node) Join(addr string, newnode *Node) error {
@@ -371,7 +431,6 @@ func (node *Node) UpdateSuccessors(end uint64, successors *[]string) error {
 	}
 	
 	nodelock.Unlock()
-
 	return nil
 }
 
@@ -443,6 +502,17 @@ func (node *Node) periodicUpdater() {
 					nodelock.Lock()
 					copy(node.Successors, temp)
 					nodelock.Unlock()
+
+					// for _, succ := range temp {
+					// 	_, present connections[succ]
+					// 	if !present {
+					// 		client = getClient(succ)
+					// 		nodelock.Lock()
+					// 		connections[succ] = client
+					// 		nodelock.Unlock()
+					// 	}
+					// }
+
 					break
 				}
 			}
@@ -548,6 +618,7 @@ func main() {
 	rpc.Register(node)
 	rpc.HandleHTTP()
 	go node.periodicUpdater()
+	go node.updateMsgQueue()
 	// tcpServer(os.Args[1])
 
 	l, e := net.Listen("tcp", os.Args[1])
