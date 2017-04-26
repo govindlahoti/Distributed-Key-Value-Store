@@ -43,10 +43,11 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 	} else {
 		target = uint64(math.Log2(float64(key + (uint64(1)<<32) - node.nodeId)))
 	}
-
+	fmt.Println(target,",",len(node.fingerTable),',',node.fingerTable[target])
 	var targetLookUp string
 
 	err := getClient(node.fingerTable[target]).Call("Node.IpLookUp", key, &targetLookUp)
+	fmt.Println(target)
 
 	for err != nil {
 		fmt.Println(err)
@@ -60,6 +61,7 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 func (node *Node) IpLookUp (key uint64, addr *string) error {
 	
 	if key >= node.startRange && key <= node.endRange {
+		fmt.Println("base case :)")
 		*addr = node.address
 	} else{
 		*addr = node.lookUpFingerTable(key)
@@ -98,11 +100,15 @@ func (node *Node) UpdateKey(key string, value *string) error {
 
 func (node *Node) updateFingerTable() {
 
+	fmt.Println("here in updateFingerTable")
 	node.fingerTable[0] = node.successors[0]
+	fmt.Println("here in updateFingerTable first reference")
 	for i := 1; i < 32; i++ {
 		var target string
 		node.IpLookUp(node.nodeId + (uint64(1)<<uint(i)), &target)
+		fmt.Println("here in updateFingerTable reference")
 		node.fingerTable[i] = target
+		fmt.Println("here in updateFingerTable reference")
 	}
 
 }
@@ -178,9 +184,15 @@ func (node *Node) Join(addr string, newnode *Node) error {
 }
 
 func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
+	// fmt.Println(*successors);
+	// fmt.Println(node.successors);
+	*successors = make([]string, len(node.successors))
 	copy(*successors, node.successors);
+	fmt.Println(*successors);
+	// fmt.Println("here");
 	copy((*successors)[1:], (*successors)[0:]);
 	(*successors)[0] = node.address
+	// fmt.Println("here after copy");
 	return nil
 }
 
@@ -196,16 +208,20 @@ func (node *Node) Leave(addr string, newnode *Node) error {
 }
 
 func (node *Node) periodicUpdater() {
-	fmt.Println("")
+	fmt.Println("here in periodicUpdater")
 	for true {
 
 		for i := 0; i < len(node.successors); i++ {
+			// fmt.Println("here in periodicUpdater i=",i)
 			err := getClient(node.successors[i]).Call("Node.UpdateSuccessors", node.address, &node.successors)
 			if err == nil {
 				break
 			}
 		}
+		
+		fmt.Println("here in periodicUpdater after successors update")
 		node.updateFingerTable()
+		fmt.Println("here in periodicUpdater finger table upto date update")
 		time.Sleep(1000 * time.Millisecond)
 	}
 }
@@ -249,16 +265,17 @@ func main() {
 	/* setup master node */
 	masterNode := new(Node)
 	if(strings.Compare(os.Args[2],"master")==0){
+		fmt.Println("here in master node creation")
 		masterNode.log = logg
 		masterNode.fingerTable = make([]string, 32)
-		masterNode.successors = make([]string,2)
+		masterNode.successors = make([]string,1)
 		masterNode.successors[0]=os.Args[1]
-		masterNode.successors[1]=os.Args[1]
 		masterNode.startRange = 0
 		masterNode.endRange = (uint64(1)<<32)-1
 		masterNode.address=os.Args[1]
 		masterNode.nodeId=(uint64(1)<<32)-1
 		masterNode.keyValueStore = make(map[string]string)
+		fmt.Println("here in master node creation done")
 	} else {
 		err := getClient(os.Args[3]).Call("Node.Join",os.Args[1],masterNode)
 		if err != nil {
