@@ -43,16 +43,17 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 	if key > node.NodeId {
 		target = uint64(math.Log2(float64(key - node.NodeId)))
 	} else {
-		target = uint64(math.Log2(float64(key + (uint64(1)<<32) - node.NodeId)))
+		target = uint64(math.Log2(float64(key + power2(32) - node.NodeId)))
 	}
 	
 	var targetLookUp string
 
 	// fmt.Println("Found the location for next hop =", node.FingerTable[target])
 	// fmt.Println("Will contact it")
-	
 	finger := node.FingerTable[target]
 	nodelock.Unlock()
+	// node.printFingerTable()
+	// node.printDetails()
 
 	client, err := getClient(finger)
 
@@ -61,11 +62,12 @@ func (node *Node) lookUpFingerTable(key uint64) string {
 		client.Close()
 	}
 	
-	for err != nil {
+	if err != nil {
 		// fmt.Println("Problem contacting it")
 		target = (target - 1 + 32) % 32
 		// fmt.Println("Found the location for previous best hop =", node.FingerTable[target])
 		// fmt.Println("Will contact it")
+		node.printFingerTable()
 		nodelock.Lock()
 		finger = node.FingerTable[target]
 		nodelock.Unlock()
@@ -85,7 +87,7 @@ func (node *Node) IpLookUp (key uint64, addr *string) error {
 	
 	// fmt.Println("IpLookUp called with key =", key)
 	nodelock.Lock()
-	if key >= node.StartRange && key <= node.EndRange {
+	if node.inRange(key) {
 		nodelock.Unlock()
 		*addr = node.Address 
 	} else{
@@ -99,17 +101,17 @@ func (node *Node) IpLookUp (key uint64, addr *string) error {
 
 func (node *Node) LookUp(key string, value *string) error {
 	
-	fmt.Println("LookUp called for key =", key)
+	// fmt.Println("LookUp called for key =", key)
 	var err error
 	var client *rpc.Client
 	err = nil
 	hash := consistentHash(key)
 
 	nodelock.Lock()
-	if hash >= node.StartRange && hash <= node.EndRange {
+	if node.inRange(hash) {
 		*value = node.KeyValueStore[key]
 		nodelock.Unlock()
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 	} else {
 		nodelock.Unlock()
 		var targetIp string
@@ -121,7 +123,7 @@ func (node *Node) LookUp(key string, value *string) error {
 		}
 	}
 
-	fmt.Println("Lookup resulted into value =", *value)
+	// fmt.Println("Lookup resulted into value =", *value)
 	return err
 }
 
@@ -136,10 +138,10 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 	hash := consistentHash(keyValue[0])
 
 	nodelock.Lock()
-	if hash >= node.StartRange && hash <= node.EndRange {
+	if node.inRange(hash) {
 		node.KeyValueStore[keyValue[0]] = keyValue[1]
 		nodelock.Unlock()
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 		fmt.Println("Added - ", keyValue[0], ": ", keyValue[1])
 	} else {
 		nodelock.Unlock()
@@ -173,7 +175,7 @@ func (node *Node) updateFingerTable() {
 
 func (node *Node) init() {
 	node.FingerTable = make([]string, 32)
-	node.Successors = make([]string, 1)
+	node.Successors = make([]string, 10)
 	node.KeyValueStore = make(map[string]string)
 }
 
@@ -186,7 +188,7 @@ func (node *Node) Join(addr string, newnode *Node) error {
 
 	nodelock.Lock()
 	newnode.NodeId = node.NodeId
-	newnode.StartRange = (node.StartRange + node.EndRange)/2 + 1
+	newnode.StartRange = (node.StartRange + (node.EndRange - node.StartRange + power2(32))%power2(32) /2 + 1) % power2(32)
 	newnode.EndRange = newnode.NodeId
 	newnode.Address = addr
 	
@@ -209,18 +211,18 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	
 	var temp Node
 	temp.init()
-	temp.NodeId = (node.StartRange + node.EndRange)/2
+	temp.NodeId = (node.StartRange + (node.EndRange - node.StartRange + power2(32))%power2(32) /2 ) % power2(32)
 	temp.StartRange = node.StartRange
 	temp.EndRange = temp.NodeId
 	copy(temp.FingerTable, node.FingerTable)
-	copy(temp.Successors[1:], temp.Successors[0:])
+	copy(temp.Successors[1:], node.Successors[0:])
 	temp.Successors[0] = addr
 	nodelock.Unlock()
 
-	// create a new fingure table
+	// create a new finger table
 	var i int
 	for i = 0; i < 32; i++ {
-		if temp.NodeId + power2(i) <= newnode.NodeId {
+		if newnode.inRange((temp.NodeId + power2(i))%power2(32)) {
 			temp.FingerTable[i] = temp.Successors[0]
 			// fmt.Println(i,temp.NodeId,temp.NodeId + power2(i),newnode.NodeId)
 		} else {
@@ -240,7 +242,7 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	/* key val store distributed */
 	newnode.KeyValueStore = make(map[string]string)
 	for k, v := range node.KeyValueStore {
-		if consistentHash(k) > temp.NodeId {
+		if newnode.inRange(consistentHash(k)) {
 			newnode.KeyValueStore[k] = v
 		} 
 	}
@@ -250,8 +252,8 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	}
 
 
-	fmt.Println(temp)
-	fmt.Println(newnode)
+	fmt.Println("In join node is temp Successors=",temp.Successors,"FingerTable=",temp.FingerTable)
+	fmt.Println("In join node is temp Successors=",newnode.Successors,"FingerTable=",newnode.FingerTable)
 	node.NodeId = temp.NodeId
 	node.StartRange = temp.StartRange
 	node.EndRange = temp.EndRange
@@ -261,7 +263,7 @@ func (node *Node) Join(addr string, newnode *Node) error {
 	return nil
 }
 
-func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
+func (node *Node) UpdateSuccessors(end uint64, successors *[]string) error {
 
 	nodelock.Lock()
 	
@@ -270,6 +272,10 @@ func (node *Node) UpdateSuccessors(addr string, successors *[]string) error {
 	fmt.Println(*successors);
 	copy((*successors)[1:], (*successors)[0:]);
 	(*successors)[0] = node.Address
+
+	if end < power2(32) {
+		node.StartRange = (end+1)%power2(32)
+	}
 	
 	nodelock.Unlock()
 
@@ -293,31 +299,54 @@ func (node *Node) periodicUpdater() {
 
 	for true {
 
-		for i := 0; i < len(node.Successors); i++ {
-			client, err := getClient(node.Successors[i])
+		nodelock.Lock()
+		r := len(node.Successors)
+		nodelock.Unlock()
+
+		for i := 0; i < r; i++ {
+			nodelock.Lock()
+			succ := node.Successors[i]
+			nodelock.Unlock()
+
+			client, err := getClient(succ)
 			if err == nil{
 				
-				nodelock.Lock()
-				temp := make([]string, len(node.Successors))
-				nodelock.Unlock()
+				temp := make([]string, r)
+				
+				var end uint64
 
-				err = client.Call("Node.UpdateSuccessors", node.Address, &temp)
+				if i > 0 {
+					nodelock.Lock()
+					end = node.EndRange
+					nodelock.Unlock()
+				} else {
+					end = power2(32)
+				}
 
-				nodelock.Lock()
-				copy(node.Successors, temp)
-				nodelock.Unlock()
-
+				err = client.Call("Node.UpdateSuccessors", end, &temp)
 				client.Close()
-			}
-			if err == nil {
-				break
+
+				if err == nil {
+					nodelock.Lock()
+					copy(node.Successors, temp)
+					nodelock.Unlock()
+					break
+				}
 			}
 		}
 
 		node.updateFingerTable()
-		node.printFingerTable()
-		node.printDetails()
-		time.Sleep(10000 * time.Millisecond)
+		// node.printFingerTable()
+		// node.printDetails()
+		time.Sleep(1000 * time.Millisecond)
+	}
+}
+
+func (node *Node) inRange(key uint64) bool {
+	if node.StartRange <= node.EndRange {
+		return node.StartRange <= key && key <= node.EndRange
+	} else {
+		return node.StartRange <= key || key <= node.EndRange   
 	}
 }
 
@@ -331,7 +360,7 @@ func (node *Node) printFingerTable(){
 	nodelock.Lock()
 	fmt.Println("------Finger Table------")
 	for i:=0;i<32;i++ {
-		fmt.Println((node.NodeId+power2(i))%power2(32),node.FingerTable[i])
+		fmt.Println((node.NodeId+power2(i)) % power2(32), node.FingerTable[i])
 	}
 	fmt.Println("-------------------------")
 	nodelock.Unlock()
@@ -389,7 +418,7 @@ func main() {
 		node.NodeId = power2(32) - 1
 		fmt.Println("here in master node creation done")
 	} else {
-		client, err:=getClient(os.Args[2])
+		client, err := getClient(os.Args[2])
 		var newnode Node
 		newnode.init()
 

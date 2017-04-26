@@ -7,23 +7,18 @@ import (
 	// "bufio"
 	"time"
 	"os"
+	"sync"
 )
 
+var cnt int64
+var lock sync.Mutex
 
-func main() {
+func user() {
 	client, err := jsonrpc.Dial("tcp", os.Args[1])
 	
 	if err != nil {
 		fmt.Println(err)
 	}
-
-	t := time.Now()
-	nanos := t.UnixNano()
-
-	var cnt int64
-	cnt = 0
-
-	fmt.Println(t)
 
 	for true {
 	
@@ -37,11 +32,41 @@ func main() {
     			// fmt.Println("Successful Insert")
     		}
 
+    		lock.Lock()
     		cnt++
+    		lock.Unlock()
 
-    		t1 := time.Now()
-    		nanos1 := t1.UnixNano()
+    		time.Sleep(10 * time.Millisecond)
+	}
+}
 
-    		fmt.Println(cnt * 1000000000.0 / (nanos1 - nanos) )
+func main() {
+	cnt = 0
+	lock = sync.Mutex{}
+
+	for i := 0; i < 100 ; i++ {
+		go user()
+	}
+
+	t := time.Now()
+	nanos := t.UnixNano()
+	t1 := time.Now()
+	nanos1 := t1.UnixNano()
+	
+	for true {
+		t1 = time.Now()
+		nanos1 = t1.UnixNano()
+
+		lock.Lock()
+		fmt.Println(cnt * 1000000000.0 / (nanos1 - nanos) )
+
+		if cnt > 1000 {
+			cnt = 0
+			t = time.Now()
+			nanos = t.UnixNano()
+		}
+
+		lock.Unlock()
+		time.Sleep(1000 * time.Millisecond)
 	}
 }
