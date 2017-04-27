@@ -575,7 +575,7 @@ func tcpServer(port string){
 
 func main() {
 	nodelock = sync.Mutex{}
-	replicationFactor = 5
+	replicationFactor = 3
 	// tcpServer()
 
 	/* creating the log file */

@@ -44,7 +44,7 @@ func main() {
 	cnt = 0
 	lock = sync.Mutex{}
 
-	for i := 0; i < 20 ; i++ {
+	for i := 0; i < 100 ; i++ {
 		go user(os.Args[1+(i%(len(os.Args)-1))])
 	}
 
