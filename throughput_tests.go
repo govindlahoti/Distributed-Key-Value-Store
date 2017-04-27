@@ -22,21 +22,21 @@ func user(addr string) {
 
 	for true {
 	
-    		var dummy int
+    		var dummy string
 
-    		err = client.Call("Node.UpdateKey", []string{randomString(), randomString()}, &dummy)
+    		err = client.Call("Node.LookUp", randomString(), &dummy)
 
     		if err != nil {
-    			fmt.Println(err)
+    			// fmt.Println(err)
+    			continue
     		} else {
     			// fmt.Println("Successful Insert")
+	    		lock.Lock()
+	    		cnt++
+	    		lock.Unlock()
     		}
 
-    		lock.Lock()
-    		cnt++
-    		lock.Unlock()
-
-    		time.Sleep(10 * time.Millisecond)
+    		// time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -44,7 +44,7 @@ func main() {
 	cnt = 0
 	lock = sync.Mutex{}
 
-	for i := 0; i < 500 ; i++ {
+	for i := 0; i < 100 ; i++ {
 		go user(os.Args[1+(i%(len(os.Args)-1))])
 	}
 
@@ -60,7 +60,7 @@ func main() {
 		lock.Lock()
 		fmt.Println(cnt * 1000000000.0 / (nanos1 - nanos) )
 
-		if cnt > 10000 {
+		if cnt > 1000 {
 			cnt = 0
 			t = time.Now()
 			nanos = t.UnixNano()

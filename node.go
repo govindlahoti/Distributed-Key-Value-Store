@@ -117,9 +117,9 @@ func (node *Node) LookUp(key string, value *string) error {
 	nodelock.Lock()
 	if node.inRange(hash) {
 		*value = node.KeyValueStore[key]
+		time.Sleep(10 * time.Millisecond)
 		nodelock.Unlock()
 		fmt.Println("Lookup resulted into value =", *value)
-		// time.Sleep(100 * time.Millisecond)
 	} else {
 		nodelock.Unlock()
 		var targetIp string
