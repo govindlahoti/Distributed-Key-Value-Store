@@ -44,7 +44,7 @@ func main() {
 	cnt = 0
 	lock = sync.Mutex{}
 
-	for i := 0; i < 100 ; i++ {
+	for i := 0; i < 20 ; i++ {
 		go user(os.Args[1+(i%(len(os.Args)-1))])
 	}
 
@@ -60,7 +60,7 @@ func main() {
 		lock.Lock()
 		fmt.Println(cnt * 1000000000.0 / (nanos1 - nanos) )
 
-		if cnt > 1000 {
+		if cnt > 100 {
 			cnt = 0
 			t = time.Now()
 			nanos = t.UnixNano()
