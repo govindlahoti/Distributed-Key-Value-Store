@@ -40,6 +40,7 @@ type Node struct {
 }
 
 var nodelock sync.Mutex
+var replicationFactor int
 
 func (node *Node) lookUpFingerTable(key uint64) string {
 
@@ -186,7 +187,7 @@ func (node *Node) UpdateKey(keyValue []string, dummy *int) error {
 		
 		msg.address = node.Address
 		// node.msgQueue = append(node.msgQueue,msg)
-		for i:=0 ; i<5 ;i++ {
+		for i:=0 ; i< replicationFactor ;i++ {
 			if strings.Compare(node.Successors[i],node.Address) == 0 {
 				break
 			}
@@ -260,7 +261,7 @@ func (node *Node) DeleteKey(key string, dummy *int) error {
 		msg.msg[0]=key
 		msg.address = node.Address
 		// node.msgQueue = append(node.msgQueue,msg)
-		for i:=0 ; i<5 ;i++ {
+		for i:=0 ; i<replicationFactor ;i++ {
 			if strings.Compare(node.Successors[i],node.Address)==0 {
 				break
 			}
@@ -325,7 +326,7 @@ func (node *Node) updateFingerTable() {
 
 func (node *Node) init() {
 	node.FingerTable = make([]string, 32)
-	node.Successors = make([]string, 10)
+	node.Successors = make([]string, replicationFactor)
 	node.KeyValueStore = make(map[string]string)
 	node.connections = make(map[string]*rpc.Client)
 	node.msgQueue = make([]Msg,0)
@@ -574,6 +575,7 @@ func tcpServer(port string){
 
 func main() {
 	nodelock = sync.Mutex{}
+	replicationFactor = 5
 	// tcpServer()
 
 	/* creating the log file */
