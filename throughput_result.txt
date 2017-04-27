@@ -1,0 +1,12 @@
+Experimental Setup :
+
+100 user send look up requests to random nodes continuously. We calculate the number of requests served by the system per second.
+To simulate the practical behavior of time taken when reading from slow disc, we add a sleep time of 0.01 sec for each request at any node.
+
+The experimental results are as follow:
+
+Number of nodes | Number of requests per second
+-----------------------------------------------
+    1           |      94
+    2           |      187
+    4           |      322
